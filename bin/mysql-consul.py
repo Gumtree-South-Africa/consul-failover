@@ -4,11 +4,12 @@ import time
 import socket
 import MySQLdb
 import MySQLdb.cursors
+import logging
 import argparse
 import warnings
 import threading
 
-from consulfailover import start_handler, log
+from consulfailover import start_handler
 
 
 class Mysql(object):
@@ -20,6 +21,7 @@ class Mysql(object):
         self.replication_user = replication_user
         self.replication_password = replication_password
         self.require_databases = require_databases
+        self.logger = logging.getLogger('ConsulFailover')
         self.connect_lock = threading.Lock()
         self.query_lock = threading.Lock()
         self.conn = None
@@ -29,19 +31,19 @@ class Mysql(object):
         """Connect or get existing connection to MySQL"""
 
         if not self.connect_lock.acquire(False):
-            log('Failed to get connect lock!')
+            self.logger.info('Failed to get connect lock!')
             return False
 
         try:
             self.conn = MySQLdb.connect(read_default_file=self.defaults_file, cursorclass=MySQLdb.cursors.DictCursor)
         except Exception as e:
-            log('Error connecting to MySQL: {}'.format(e))
+            self.logger.info('Error connecting to MySQL: {}'.format(e))
             self.conn = None
             return False
         finally:
             self.connect_lock.release()
 
-        log('Connected to MySQL on port {}'.format(self.port))
+        self.logger.info('Connected to MySQL on port {}'.format(self.port))
         return True
 
     def query(self, query):
@@ -52,7 +54,7 @@ class Mysql(object):
             return {}
 
         if not self.query_lock.acquire():
-            log('Failed to get query lock!')
+            self.logger.info('Failed to get query lock!')
             return {}
 
         if query.startswith('CHANGE MASTER TO') or query.startswith('STOP SLAVE'):
@@ -63,11 +65,11 @@ class Mysql(object):
             cursor.execute(query)
         # Attempt to reconnect to MySQL if the connection has been lost
         except MySQLdb.OperationalError as e:
-            log('Connection failed during query: {}'.format(e))
+            self.logger.info('Connection failed during query: {}'.format(e))
             self.connect()
             return {}
         except Exception as e:
-            log('Query failed: "{}": {}'.format(query, e))
+            self.logger.info('Query failed: "{}": {}'.format(query, e))
             return {}
         # Make sure to release the connection if we got one
         finally:
@@ -113,7 +115,7 @@ class Mysql(object):
         """Make sure this host is configured as the master"""
 
         if self.query('SHOW SLAVE STATUS'):
-            log('Becoming master')
+            self.logger.info('Becoming master')
             self.query('STOP SLAVE')
             self.query('RESET SLAVE ALL')
             self.query('SET GLOBAL read_only = 0')
@@ -121,7 +123,7 @@ class Mysql(object):
 
         # Make sure the master is read-write
         if self.get_variable('read_only') != 0:
-            log('Setting read_only to off')
+            self.logger.info('Setting read_only to off')
             self.query('SET GLOBAL read_only = 0')
 
     def ensure_slave(self, master_host):
@@ -130,12 +132,12 @@ class Mysql(object):
         slave_status = self.query('SHOW SLAVE STATUS')
 
         if not type(slave_status) == dict:
-            log('Error getting slave status: {}'.format(slave_status))
+            self.logger.info('Error getting slave status: {}'.format(slave_status))
             return False
 
         # Do a master switch if we are not yet slaving from master_host
         if not slave_status or slave_status.get('Master_Host') != master_host:
-            log('Becoming a slave to {}'.format(master_host))
+            self.logger.info('Becoming a slave to {}'.format(master_host))
             self.query('FLUSH LOCAL TABLES WITH READ LOCK')
             self.query('SET GLOBAL read_only=1')
             self.query('UNLOCK TABLES')
@@ -147,13 +149,13 @@ class Mysql(object):
 
         # Try restarting slave threads if they are not running
         if slave_status.get('Slave_IO_Running') != 'Yes' or slave_status.get('Slave_SQL_Running') != 'Yes':
-            log('Slave threads are not running, trying to restart them')
+            self.logger.info('Slave threads are not running, trying to restart them')
             self.query('STOP SLAVE')
             self.query('START SLAVE')
 
         # Make sure the slave is read-only
         if self.get_variable('read_only') != 1:
-            log('Setting host read-only')
+            self.logger.info('Setting host read-only')
             self.query('SET GLOBAL read_only = 1')
 
 

@@ -4,13 +4,12 @@ import time
 import consul
 import signal
 import socket
+import logging
 import threading
 import SocketServer
 import SimpleHTTPServer
 
 from consul.base import ConsulException
-
-cluster_name = socket.gethostname().rstrip('0123456789')
 
 
 class TCPServer(SocketServer.TCPServer):
@@ -70,6 +69,7 @@ class ConsulHandler(object):
         self.cluster_name = cluster_name
         self.api_port = api_port
         self.application_port = application_port
+        self.logger = logging.getLogger('ConsulFailover')
         self.consul = consul.Consul()
         self.health_check = consul.Check.http('http://127.0.0.1:{}/health'.format(self.api_port), 10)
 
@@ -101,7 +101,7 @@ class ConsulHandler(object):
             try:
                 return self.consul.session.create(name=self.cluster_name, checks=session_checks, lock_delay=1)
             except ConsulException as e:
-                log('Error creating session: {}'.format(e))
+                self.logger.info('Error creating session: {}'.format(e))
                 time.sleep(2)
 
     def register(self):
@@ -113,7 +113,7 @@ class ConsulHandler(object):
         if self.cluster_name in services:
             return
 
-        log('Registering service in Consul')
+        self.logger.info('Registering service in Consul')
         self.consul.agent.service.register(self.cluster_name, port=self.application_port, check=self.health_check)
         # Give the Consul agent time to find our registration
         time.sleep(1)
@@ -130,10 +130,10 @@ class ConsulHandler(object):
         session = self.get_existing_session()
 
         if session:
-            log('Destroying leader session')
+            self.logger.info('Destroying leader session')
             self.consul.session.destroy(session)
 
-        log('Deregistering service in Consul')
+        self.logger.info('Deregistering service in Consul')
         return self.consul.agent.service.deregister(self.cluster_name)
 
     def set_tag(self, tag):
@@ -145,7 +145,7 @@ class ConsulHandler(object):
         if self.cluster_name in services and services[self.cluster_name]['Tags'] == [tag]:
             return
 
-        log('Updating tag to {}'.format(tag))
+        self.logger.info('Updating tag to {}'.format(tag))
         self.consul.agent.service.register(self.cluster_name, port=self.application_port, check=self.health_check, tags=[tag])
 
         return True
@@ -179,13 +179,13 @@ class ConsulHandler(object):
         checks = self.consul.agent.checks()
 
         if not checks:
-            log('Consul agent does not have any health checks')
+            self.logger.info('Consul agent does not have any health checks')
             return False
 
         check = checks.get('service:{}'.format(self.cluster_name))
 
         if not check:
-            log('Consul agent does not have a health check for service "{}"'.format(self.cluster_name))
+            self.logger.info('Consul agent does not have a health check for service "{}"'.format(self.cluster_name))
             return False
 
         # A check state of 'passing' is True, anything else is False
@@ -210,9 +210,10 @@ class ConsulHandler(object):
             if is_healthy != last_health:
                 last_health = is_healthy
                 health_text = {True: 'healthy'}.get(is_healthy, 'not healthy')
-                log('Service is {}'.format(health_text))
+                self.logger.info('Service is {}'.format(health_text))
 
             if not is_healthy:
+                self.set_tag('unhealthy')
                 continue
 
             # Attempt to lock, and become the master if it works
@@ -227,26 +228,22 @@ class ConsulHandler(object):
                     self.set_tag('slave')
                     self.apphandler.ensure_slave(leader)
                 else:
-                    log('Unable to lock and unable to determine leader, retrying...')
+                    self.logger.info('Unable to lock and unable to determine leader, retrying...')
 
     def graceful_exit(self, signum=None, frame=None):
         self.deregister()
         sys.exit(0)
 
 
-def log(msg):
-    """Output a log message"""
-
-    disp_time = time.strftime('%Y-%m-%d %H:%M:%S')
-    print '{} [{}] {}'.format(disp_time, cluster_name, msg)
-
-
-def start_handler(apphandler_class, apphandler_args, application_port, api_port, cluster_name_override=None):
+def start_handler(apphandler_class, apphandler_args, application_port, api_port, cluster_name=socket.gethostname().rstrip('0123456789')):
     """Set up an application for Consul failover"""
 
-    if cluster_name_override:
-        global cluster_name
-        cluster_name = cluster_name_override
+    logger = logging.getLogger('ConsulFailover')
+    logger.setLevel('INFO')
+    loghandler = logging.StreamHandler()
+    logformatter = logging.Formatter(fmt='%(asctime)s [{}] %(message)s'.format(cluster_name), datefmt='%Y-%m-%d %H:%M:%S')
+    loghandler.setFormatter(logformatter)
+    logger.addHandler(loghandler)
 
     consulhandler = ConsulHandler(apphandler_class, apphandler_args, cluster_name, api_port, application_port)
 
@@ -256,7 +253,7 @@ def start_handler(apphandler_class, apphandler_args, application_port, api_port,
     thread = threading.Thread(target=apiserver.serve_forever)
     thread.daemon = True
     thread.start()
-    log('API server listening on port {0}'.format(api_port))
+    logger.info('API server listening on port {0}'.format(api_port))
 
     # Start monitoring the service
     consulhandler.monitor()

@@ -4,11 +4,12 @@ import os
 import json
 import time
 import socket
+import logging
 import urllib2
 import argparse
 import subprocess
 
-from consulfailover import start_handler, log
+from consulfailover import start_handler
 
 
 class Solr(object):
@@ -21,6 +22,7 @@ class Solr(object):
         self.base_dir = base_dir
         self.restart_timeout = restart_timeout
         self.restart_flag_file = restart_flag_file
+        self.logger = logging.getLogger('ConsulFailover')
 
     def flag_restart(self):
         """Flag the time of a master restart"""
@@ -42,7 +44,7 @@ class Solr(object):
         try:
             restart_time = float(restart_time)
         except ValueError:
-            log('Invalid timestamp in {}: {}'.format(self.restart_flag_file, restart_time))
+            self.logger.info('Invalid timestamp in {}: {}'.format(self.restart_flag_file, restart_time))
             os.remove(self.restart_flag_file)
             return False
 
@@ -99,7 +101,7 @@ class Solr(object):
 
         init_arg = {'up': 'start', 'down': 'stop'}.get(want_state)
         args = ['/etc/init.d/tomcat7-solr', init_arg]
-        log('Bringing solr {0}'.format(want_state))
+        self.logger.info('Bringing solr {0}'.format(want_state))
 
         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         res = p.communicate()
@@ -126,11 +128,11 @@ class Solr(object):
             if (time.time() - last_notify) > 30:
                 last_notify = time.time()
                 time_left = int(5 * round(max_time - time.time()) / 5)
-                log('Will wait up to {} more seconds for Solr to restart'.format(time_left))
+                self.logger.info('Will wait up to {} more seconds for Solr to restart'.format(time_left))
 
             time.sleep(2)
 
-        log('Solr did not come {} within {} seconds'.format(want_state, self.restart_timeout))
+        self.logger.info('Solr did not come {} within {} seconds'.format(want_state, self.restart_timeout))
         return False
 
     def _get_properties_config(self, config_type):
@@ -199,14 +201,14 @@ class Solr(object):
         if self.is_master():
             return False
 
-        log('Becoming master')
+        self.logger.info('Becoming master')
         self.flag_restart()
 
         if self.control_solr('down') and self.set_properties('master') and self.control_solr('up'):
-            log('Master restarted successfully')
+            self.logger.info('Master restarted successfully')
             return True
 
-        log('Master failed to restart!')
+        self.logger.info('Master failed to restart!')
         return False
 
     def ensure_slave(self, master_host=None):
@@ -215,13 +217,13 @@ class Solr(object):
         if self.is_slave():
             return
 
-        log('Becoming a slave')
+        self.logger.info('Becoming a slave')
 
         if self.control_solr('down') and self.set_properties('slave') and self.control_solr('up'):
-            log('Slave restarted successfully')
+            self.logger.info('Slave restarted successfully')
             return True
 
-        log('Slave failed to restart!')
+        self.logger.info('Slave failed to restart!')
         return False
 
 
