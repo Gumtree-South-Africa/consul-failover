@@ -1,6 +1,7 @@
 #! /usr/bin/python
 
 import time
+import consul
 import socket
 import MySQLdb
 import MySQLdb.cursors
@@ -21,6 +22,7 @@ class Mysql(object):
         self.replication_user = replication_user
         self.replication_password = replication_password
         self.require_databases = require_databases
+        self.consul = consul.Consul()
         self.logger = logging.getLogger('ConsulFailover')
         self.connect_lock = threading.Lock()
         self.query_lock = threading.Lock()
@@ -91,6 +93,46 @@ class Mysql(object):
 
         return res.get('@@{}'.format(variable))
 
+    def post_transactions(self):
+        """Post the list of executed transactions to Consul"""
+
+        res = self.query('SELECT @@GLOBAL.GTID_EXECUTED AS transactions')
+
+        if not res.get('transactions'):
+            self.logger.debug('No transactions listed in GTID_EXECUTED')
+            return
+
+        transactions = res['transactions'].replace('\n', '')
+        self.logger.debug('Posting transactions to Consul: {}'.format(transactions))
+        self.consul.kv.put('mysql/{}/transactions'.format(socket.gethostname()), value=transactions)
+
+    def get_leader_transactions(self, master_host):
+        """Get the transactions that have been executed on the master"""
+
+        res = self.consul.kv.get('mysql/{}/transactions'.format(master_host))
+
+        if not res or not res[1]:
+            return
+
+        return res[1].get('Value')
+
+    def master_is_ahead(self, master_host):
+        """Test whether the master has transactions that this slave hasn't executed yet"""
+
+        # Gossip pause
+        time.sleep(1)
+        master_transactions = self.get_leader_transactions(master_host)
+
+        if not master_transactions:
+            return False
+
+        res = self.query('SELECT GTID_SUBTRACT("{}", @@GLOBAL.GTID_EXECUTED) as leftovers'.format(master_transactions))
+
+        if res and res.get('leftovers'):
+            return True
+
+        return False
+
     def health(self):
         """Return MySQL server health status"""
 
@@ -114,17 +156,25 @@ class Mysql(object):
     def ensure_master(self):
         """Make sure this host is configured as the master"""
 
-        if self.query('SHOW SLAVE STATUS'):
-            self.logger.info('Becoming master')
-            self.query('STOP SLAVE')
-            self.query('RESET SLAVE ALL')
-            self.query('SET GLOBAL read_only = 0')
-            return True
+        self.post_transactions()
+        slave_status = self.query('SHOW SLAVE STATUS')
 
         # Make sure the master is read-write
         if self.get_variable('read_only') != 0:
             self.logger.info('Setting read_only to off')
             self.query('SET GLOBAL read_only = 0')
+
+        # Stop slave threads once we are caught up to the old master
+        if slave_status:
+
+            # Don't stop slave if the old master is ahead and still alive
+            if slave_status.get('Master_Host') and slave_status['Master_Host'] != socket.gethostname() and self.master_is_ahead(slave_status['Master_Host']):
+                self.logger.info('{} is still ahead, waiting to catch up...'.format(slave_status['Master_Host']))
+                return
+
+            self.logger.info('Stopping slave threads')
+            self.query('STOP SLAVE')
+            self.query('RESET SLAVE ALL')
 
     def ensure_slave(self, master_host):
         """Make sure this host is configured as a slave"""
@@ -170,10 +220,11 @@ def parse():
     parser.add_argument('-f', '--defaults-file', default='/etc/mysql/consul.cnf', help='Auth file for MySQL connections')
     parser.add_argument('-e', '--replication-user', default='replication', help='Username for replication')
     parser.add_argument('-r', '--replication-password', required=True, help='Password for replication')
+    parser.add_argument('-l', '--log-level', default='INFO', help='Output level (default: %(default)s)')
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse()
     mysql_args = [args.port, args.defaults_file, args.replication_user, args.replication_password, args.require_databases]
-    start_handler(Mysql, mysql_args, args.port, args.api_port, args.cluster_name)
+    start_handler(Mysql, mysql_args, args.port, args.api_port, args.cluster_name, args.log_level)

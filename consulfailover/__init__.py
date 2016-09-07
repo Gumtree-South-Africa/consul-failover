@@ -235,11 +235,11 @@ class ConsulHandler(object):
         sys.exit(0)
 
 
-def start_handler(apphandler_class, apphandler_args, application_port, api_port, cluster_name=socket.gethostname().rstrip('0123456789')):
+def start_handler(apphandler_class, apphandler_args, application_port, api_port, cluster_name=socket.gethostname().rstrip('0123456789'), log_level='INFO'):
     """Set up an application for Consul failover"""
 
     logger = logging.getLogger('ConsulFailover')
-    logger.setLevel('INFO')
+    logger.setLevel(log_level.upper())
     loghandler = logging.StreamHandler()
     logformatter = logging.Formatter(fmt='%(asctime)s [{}] %(message)s'.format(cluster_name), datefmt='%Y-%m-%d %H:%M:%S')
     loghandler.setFormatter(logformatter)
