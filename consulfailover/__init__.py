@@ -1,3 +1,4 @@
+import os
 import sys
 import json
 import time
@@ -63,7 +64,7 @@ class HTTPHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
 class ConsulHandler(object):
 
-    def __init__(self, apphandler_class, apphandler_args, cluster_name, api_port, application_port):
+    def __init__(self, apphandler_class, apphandler_args, cluster_name, api_port, application_port, disable_flag_file='/var/tmp/consul_failover_disable'):
 
         self.apphandler = apphandler_class(*apphandler_args)
         self.cluster_name = cluster_name
@@ -72,6 +73,7 @@ class ConsulHandler(object):
         self.logger = logging.getLogger('ConsulFailover')
         self.consul = consul.Consul()
         self.health_check = consul.Check.http('http://127.0.0.1:{}/health'.format(self.api_port), 10)
+        self.disable_flag_file = disable_flag_file
 
     def get_existing_session(self):
         """Return an existing Consul session if there is one"""
@@ -214,6 +216,14 @@ class ConsulHandler(object):
 
             if not is_healthy:
                 self.set_tag('unhealthy')
+                continue
+
+            if os.path.exists(self.disable_flag_file):
+
+                if not self.get_tag() == 'disabled':
+                    self.logger.info('Disabling service because {} exists'.format(self.disable_flag_file))
+
+                self.set_tag('disabled')
                 continue
 
             # Attempt to lock, and become the master if it works

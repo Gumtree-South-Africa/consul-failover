@@ -15,7 +15,7 @@ from consulfailover import start_handler
 class Solr(object):
     """Manage Solr"""
 
-    def __init__(self, port, base_uri, base_dir, restart_timeout=300, restart_flag_file='/var/tmp/solr_restart.txt'):
+    def __init__(self, port, base_uri, base_dir, restart_timeout=300, restart_flag_file='/var/tmp/solr_restart'):
 
         self.port = port
         self.base_uri = base_uri
