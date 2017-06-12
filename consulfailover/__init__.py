@@ -64,7 +64,7 @@ class HTTPHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
 
 class ConsulHandler(object):
 
-    def __init__(self, apphandler_class, apphandler_args, cluster_name, api_port, application_port, disable_flag_file='/var/tmp/consul_failover_disable'):
+    def __init__(self, apphandler_class, apphandler_args, cluster_name, api_port, application_port, check_interval='30s', disable_flag_file='/var/tmp/consul_failover_disable'):
 
         self.apphandler = apphandler_class(*apphandler_args)
         self.cluster_name = cluster_name
@@ -72,7 +72,7 @@ class ConsulHandler(object):
         self.application_port = application_port
         self.logger = logging.getLogger('ConsulFailover')
         self.consul = consul.Consul()
-        self.health_check = consul.Check.http('http://127.0.0.1:{}/health'.format(self.api_port), 10)
+        self.health_check = consul.Check.http('http://127.0.0.1:{}/health'.format(self.api_port), check_interval)
         self.disable_flag_file = disable_flag_file
 
     def get_existing_session(self):
@@ -245,7 +245,7 @@ class ConsulHandler(object):
         sys.exit(0)
 
 
-def start_handler(apphandler_class, apphandler_args, application_port, api_port, cluster_name=socket.gethostname().rstrip('0123456789'), log_level='INFO'):
+def start_handler(apphandler_class, apphandler_args, application_port, api_port, cluster_name=socket.gethostname().rstrip('0123456789'), log_level='INFO', check_interval='30s'):
     """Set up an application for Consul failover"""
 
     logger = logging.getLogger('ConsulFailover')
@@ -255,7 +255,7 @@ def start_handler(apphandler_class, apphandler_args, application_port, api_port,
     loghandler.setFormatter(logformatter)
     logger.addHandler(loghandler)
 
-    consulhandler = ConsulHandler(apphandler_class, apphandler_args, cluster_name, api_port, application_port)
+    consulhandler = ConsulHandler(apphandler_class, apphandler_args, cluster_name, api_port, application_port, check_interval)
 
     # Start API server
     apiserver = TCPServer(('', api_port), HTTPHandler)

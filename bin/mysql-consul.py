@@ -221,10 +221,11 @@ def parse():
     parser.add_argument('-e', '--replication-user', default='replication', help='Username for replication')
     parser.add_argument('-r', '--replication-password', required=True, help='Password for replication')
     parser.add_argument('-l', '--log-level', default='INFO', help='Output level (default: %(default)s)')
+    parser.add_argument('-i', '--check-interval', default='30s', help='Consul check timeout (default: %(default)s)')
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse()
     mysql_args = [args.port, args.defaults_file, args.replication_user, args.replication_password, args.require_databases]
-    start_handler(Mysql, mysql_args, args.port, args.api_port, args.cluster_name, args.log_level)
+    start_handler(Mysql, mysql_args, args.port, args.api_port, args.cluster_name, args.log_level, args.check_interval)

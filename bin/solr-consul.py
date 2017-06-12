@@ -237,10 +237,11 @@ def parse():
     parser.add_argument('-p', '--port', type=int, default=8080, help='Solr API port (default: %(default)s)')
     parser.add_argument('-u', '--base-uri', default='/solr', help='Solr API path prefix (default: %(default)s)')
     parser.add_argument('-b', '--base-dir', default='/var/lib/tomcat7multi/solr/solr', help='Base directory for Solr cores (default: %(default)s)')
+    parser.add_argument('-i', '--check-interval', default='30s', help='Consul check timeout (default: %(default)s)')
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = parse()
     solr_args = [args.port, args.base_uri, args.base_dir]
-    start_handler(Solr, solr_args, args.port, args.api_port, args.cluster_name)
+    start_handler(Solr, solr_args, args.port, args.api_port, args.cluster_name, check_interval=args.check_interval)
