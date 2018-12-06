@@ -7,8 +7,8 @@ import signal
 import socket
 import logging
 import threading
-import SocketServer
-import SimpleHTTPServer
+import socketserver as SocketServer
+from http import server as SimpleHTTPServer
 
 from consul.base import ConsulException
 
@@ -59,7 +59,7 @@ class HTTPHandler(SimpleHTTPServer.SimpleHTTPRequestHandler):
         self.send_response(status_code)
         self.send_header('Content-Type', 'application/json')
         self.end_headers()
-        self.wfile.write(response_text)
+        self.wfile.write(response_text.encode())
 
 
 class ConsulHandler(object):

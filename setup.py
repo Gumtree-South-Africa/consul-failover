@@ -3,7 +3,7 @@ from setuptools import setup
 
 setup(
     name='consul-failover',
-    version=0.1,
+    version=0.4,
     author='Patrick McConnell',
     author_email='pmcconnell@ebay.com',
     maintainer='Patrick McConnell',
@@ -16,8 +16,8 @@ setup(
         'consulfailover',
     ],
     install_requires=[
-        'python-consul',
-        'python-mysqldb',
+        'python3-consul',
+        'python3-mysqldb',
     ],
     scripts=[
         'bin/mysql-consul.py',

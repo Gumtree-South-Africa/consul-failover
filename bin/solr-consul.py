@@ -5,7 +5,7 @@ import json
 import time
 import socket
 import logging
-import urllib2
+import urllib as urllib2
 import argparse
 import subprocess
 
